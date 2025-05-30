@@ -219,14 +219,72 @@ def extract_entities_and_relations(sentences, relations_):
     return data
 
 
-def predict_relations(text, model=None, tokenizer=None):
+def prepareData(val_text, val_label, tokenizer, cls_id, sep_id, pad_id, e1_id, e2_id):
     """
-    Predict temporal relations for input text.
+    Prepare data for model input with special token handling.
     
     Args:
-        text (str): Input text with temporal entity markers
-        model: Trained temporal relation model  
+        val_text (list): List of text strings
+        val_label (list): List of labels (can be None for prediction)
         tokenizer: BERT tokenizer
+        cls_id (int): CLS token ID
+        sep_id (int): SEP token ID  
+        pad_id (int): PAD token ID
+        e1_id (int): Entity 1 token ID
+        e2_id (int): Entity 2 token ID
+        
+    Returns:
+        tuple: (x_token, x_mark_index_all, labels)
+    """
+    labels = []
+    x_token = []
+    x_mark_index_all = []
+    
+    for cnt, item in enumerate(val_text):
+        temp = tokenizer.encode(
+            item,
+            add_special_tokens=False,
+            max_length=512,
+            truncation=True,
+            padding="max_length",
+        )
+        while len(temp) < 512:
+            temp.append(pad_id)
+            
+        temp_cup = list(enumerate(temp))
+        cls_index = [index for index, value in temp_cup if value == cls_id]
+        cls_index.append(0)
+        e1_index = [index for index, value in temp_cup if value == e1_id]
+        e2_index = [index for index, value in temp_cup if value == e2_id]
+        sep_index = [index for index, value in temp_cup if value == sep_id]
+        
+        if len(e1_index) != 2 or len(e2_index) != 2:
+            continue
+            
+        sep_index.append(0)
+        x_mark_index = []
+        x_mark_index.append(cls_index)
+        x_mark_index.append(e1_index)
+        x_mark_index.append(e2_index)
+        x_mark_index.append(sep_index)
+        x_mark_index_all.append(x_mark_index)
+        x_token.append(temp)
+        
+        if val_label is not None:
+            labels.append(val_label[cnt])
+            
+    return (x_token, x_mark_index_all, labels)
+
+
+def predict_relations(text, model, tokenizer, label2class=None):
+    """
+    Predict temporal relations for input text using the actual working prediction code.
+    
+    Args:
+        text (str): Input text with temporal entity markers ($ and #)
+        model: Trained temporal relation model  
+        tokenizer: BERT tokenizer with special tokens configured
+        label2class (dict): Mapping from class indices to label names
         
     Returns:
         str: Predicted temporal relation label
@@ -235,51 +293,51 @@ def predict_relations(text, model=None, tokenizer=None):
         print("Model and tokenizer required for prediction")
         return "UNKNOWN"
     
-    # Preprocess text
-    processed_text = clean_str(text)
+    # Default label mapping if not provided
+    if label2class is None:
+        label2class = {
+            0: "BEFORE",
+            1: "AFTER", 
+            2: "EQUAL",
+            3: "VAGUE"
+        }
     
-    # Add special tokens if not present
-    if "[CLS]" not in processed_text:
-        processed_text = "[CLS] " + processed_text + " [SEP]"
+    # Get special token IDs
+    cls_id, sep_id, pad_id, e1_id, e2_id = setup_special_tokens(tokenizer)
     
-    # Tokenize
-    tokens = tokenizer.tokenize(processed_text)
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+    # Prepare the sentence as a list (matching original format)
+    sentence = [text]
     
-    # Create attention mask
-    attention_mask = [1] * len(input_ids)
-    
-    # Pad to max length if needed
-    max_len = 512
-    while len(input_ids) < max_len:
-        input_ids.append(tokenizer.pad_token_id)
-        attention_mask.append(0)
-    
-    # Convert to tensors
-    input_ids = torch.tensor([input_ids])
-    attention_mask = torch.tensor([attention_mask])
-    
-    # Find entity positions (simplified)
-    e1_pos = [i for i, token in enumerate(tokens) if token in ["$", "<e1>"]]
-    e2_pos = [i for i, token in enumerate(tokens) if token in ["#", "<e2>"]]
-    
-    if len(e1_pos) >= 2 and len(e2_pos) >= 2:
-        event_ix = torch.tensor([[e1_pos[0], e2_pos[0]]])
-    else:
-        event_ix = torch.tensor([[1, 2]])  # Default positions
-    
-    # Predict
-    model.eval()
-    with torch.no_grad():
-        # Note: This is a simplified prediction - full implementation would 
-        # require graph construction and proper preprocessing
-        outputs = model(input_ids, attention_mask, event_ix, [])
-        logits = outputs[1] if len(outputs) > 1 else outputs[0]
-        predicted_class = torch.argmax(logits, dim=1).item()
-    
-    # Map prediction to label
-    label_map = {0: "BEFORE", 1: "AFTER", 2: "EQUAL", 3: "VAGUE"}
-    return label_map.get(predicted_class, "UNKNOWN")
+    try:
+        # Use the original prepareData function
+        tx_token, tx_mark_index_all, tlabels1 = prepareData(
+            sentence, None, tokenizer, cls_id, sep_id, pad_id, e1_id, e2_id
+        )
+        
+        if not tx_token:  # If prepareData returns empty (entity markers not found properly)
+            return "UNKNOWN"
+        
+        # Convert to numpy and torch tensors (matching original code exactly)
+        tx_token = np.vstack(tx_token).astype(float)
+        tx_token = np.array(tx_token)
+        tx_token = torch.from_numpy(tx_token)
+        
+        # Set model to evaluation mode
+        model.eval()
+        
+        # Make prediction (matching original code exactly)
+        with torch.no_grad():
+            out = model(tx_token.clone().detach().requires_grad_(True).long(), tx_mark_index_all)
+            
+        # Get predicted class and convert to label (matching original code)
+        predicted_class = torch.max(out[1], 1)[1].item()
+        predicted_label = label2class[predicted_class]
+        
+        return predicted_label
+        
+    except Exception as e:
+        print(f"Error during prediction: {e}")
+        return "UNKNOWN"
 
 
 def create_edge_dict():
