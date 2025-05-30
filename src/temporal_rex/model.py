@@ -438,27 +438,10 @@ def train(
 
     # Training loop implementation would go here
     # (omitted for brevity as it's quite long)
-    
 
-def predict_relations(text, model, tokenizer):
-    """
-    Predict temporal relations for a given text.
-    
-    Args:
-        text (str): Input text with temporal entities marked
-        model: Trained temporal relation model
-        tokenizer: BERT tokenizer
-        
-    Returns:
-        str: Predicted temporal relation
-    """
-    # Preprocessing
-    sentence = [text]
-    
-    # This would include the full prediction pipeline
-    # For now, return a placeholder
-    return "BEFORE"  # Placeholder prediction
 
+# Import the enhanced predict_relations function from utils
+from .utils import predict_relations
 
 # Global variables that would be set during training
 class_weights = None
