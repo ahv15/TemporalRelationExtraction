@@ -17,6 +17,7 @@ import networkx as nx
 import numpy as np
 from math import ceil
 import logging
+from tqdm import tqdm
 
 
 class CustomTrainer(Trainer):
@@ -403,6 +404,9 @@ def train(
     total_test_graphs,
     device,
     n_gpu,
+    output_model=None,
+    LabelType=None,
+    calc_f1=None,
 ):
     """Training function for temporal relation models."""
     num_training_steps_per_epoch = ceil(len(train_dataloader.dataset) / float(64))
@@ -436,8 +440,87 @@ def train(
         num_training_steps=num_training_steps,
     )
 
-    # Training loop implementation would go here
-    # (omitted for brevity as it's quite long)
+    # Load checkpoint if provided
+    if output_model:
+        checkpoint = torch.load(output_model, map_location="cpu")
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    global_step = 0
+    best_acc = 0.0
+    update_per_batch = 2
+    for epoch in range(1, 11, 1):
+        model.train()
+        global_loss = 0.0
+        for i, batch in tqdm(
+            enumerate(train_dataloader),
+            desc=f"Running train for epoch {epoch}",
+            total=len(train_dataloader),
+        ):
+            batch = [x.to(device) for x in batch]
+            inputs = {
+                "input_ids": batch[0],
+                "attention_mask": batch[1],
+                "event_ix": batch[2],
+                "labels": batch[3],
+                "graph": total_train_graphs[
+                    i * len(batch[0]) : (i + 1) * len(batch[0])
+                ],
+            }
+            outputs = model(**inputs)
+            loss, logits = outputs[0], outputs[1]
+
+            loss /= update_per_batch
+            loss.backward()
+            if (i + 1) % update_per_batch == 0 or (i + 1) == len(train_dataloader):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+
+                optimizer.step()
+                scheduler.step()
+                model.zero_grad()
+                global_step += 1
+                global_loss = 0
+        logging.info(f"Evaluation for epoch {epoch}")
+        model.eval()
+        label_type = LabelType
+        all_logits, all_labels = [], []
+        with torch.no_grad():
+            for j, batch in tqdm(enumerate(dev_dataloader), total=len(dev_dataloader)):
+                batch = [x.to(device) for x in batch]
+                inputs = {
+                    "input_ids": batch[0],
+                    "attention_mask": batch[1],
+                    "event_ix": batch[2],
+                    "labels": batch[3],
+                    "graph": total_test_graphs[
+                        j * len(batch[0]) : (j + 1) * len(batch[0])
+                    ],
+                }
+                outputs = model(**inputs)
+                loss, logits = outputs[0], outputs[1]
+                all_logits.append(logits)
+                all_labels.append(inputs["labels"])
+
+        all_logits = torch.cat(all_logits, dim=0)
+        all_labels = torch.cat(all_labels, dim=0)
+
+        predicted_logits, predicted_labels = torch.max(all_logits, dim=1)
+
+        if calc_f1:
+            dev_acc, dev_prec, dev_rec, dev_f1 = calc_f1(
+                predicted_labels, all_labels, label_type
+            )
+            print(f"Acc={dev_acc}, Precision={dev_prec}, Recall={dev_rec}, F1={dev_f1}")
+        else:
+            dev_f1 = 0.0  # Default if calc_f1 not provided
+            
+        # Save model using utils save function
+        from .utils import save
+        save(model, optimizer)
+        
+        if dev_f1 > best_acc:
+            logging.info(f"New best, dev_f1={dev_f1} > best_f1={best_acc}")
+            best_acc = dev_f1
 
 
 # Import the enhanced predict_relations function from utils
