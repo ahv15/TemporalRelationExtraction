@@ -59,8 +59,7 @@ TemporalRelationExtraction/
 │   ├── eval.py                # Evaluation metrics and utilities
 │   └── utils.py               # Helper functions and utilities
 ├── requirements.txt           # Project dependencies
-├── README.md                 # This file
-└── TemporalRelationExtraction.py  # Original monolithic script
+└── README.md                 # This file
 ```
 
 ### Module Overview
