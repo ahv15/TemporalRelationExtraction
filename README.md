@@ -38,12 +38,15 @@ from transformers import AutoTokenizer
 
 # Initialize tokenizer
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+config = AutoConfig.from_pretrained("distilbert-base-uncased")
+model = TempRelModel(config, tokenizer, num_labels=4, 
+                     edge_dict={}, max_nodes=100)
 
 # Example text with temporal entities marked
 text = "The patient went into a $ coma $ after he had a # heart attack #."
 
 # Predict temporal relation
-relation = predict_relations(text)
+relation = predict_relations(text, model, tokenizer)
 print(f"Temporal relation: {relation}")
 # Output: "Temporal relation: AFTER"
 ```
