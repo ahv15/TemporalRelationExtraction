@@ -109,22 +109,72 @@ Predicted temporal relations:
 
 ```python
 from src.temporal_rex.model import TempRelModel, train
-from src.temporal_rex.data import temprel_set
+from src.temporal_rex.data import _get_tensorset
+from src.temporal_rex.utils import (
+    create_edge_dict,
+    setup_special_tokens,
+    generateDependencyGraph,
+    normalize_graph_nodes,
+)
 from transformers import AutoTokenizer, AutoConfig
+import torch
+from torch.utils.data import DataLoader
 
-# Load data
+# 1. Load tokenizer & register special tokens ($ and #). These IDs will be used internally by temprel_set.to_tensor().
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-trainset = temprel_set("data/trainset-temprel.xml")
-train_data, _ = trainset.to_tensor(tokenizer)
+cls_id, sep_id, pad_id, e1_id, e2_id = setup_special_tokens(tokenizer)
 
-# Initialize model
+# 2. Use the provided _get_tensorset(...) helper to obtain:
+#    - train_ds, dev_ds, test_ds: TensorDatasets of (input_ids, attention_mask, event_ix, labels)
+#    - train_text, dev_text, test_text: raw sentences (with $/# markers) used to build dependency graphs.
+train_ds, dev_ds, test_ds, train_text, dev_text, test_text = _get_tensorset(tokenizer)
+
+# 3. Build a default edge dictionary for dependency parsing:
+edge_dict = create_edge_dict()
+
+# 4. Generate one DGL graph per sentence (for train/dev/test). Each call appends to the provided list.
+#    Pass `count=len(edge_dict)` so that any new edge types get unique IDs appended
+total_train_graphs = generateDependencyGraph(edge_dict, train_text, count=len(edge_dict), total_train_graphs=[])
+total_dev_graphs   = generateDependencyGraph(edge_dict, dev_text,   count=len(edge_dict), total_train_graphs=[])
+total_test_graphs  = generateDependencyGraph(edge_dict, test_text,  count=len(edge_dict), total_train_graphs=[])
+
+# 5. Normalize all graphs to have the same number of nodes (100). 
+max_nodes = 100
+total_train_graphs = normalize_graph_nodes(total_train_graphs, max_nodes)
+total_dev_graphs   = normalize_graph_nodes(total_dev_graphs,   max_nodes)
+total_test_graphs  = normalize_graph_nodes(total_test_graphs,  max_nodes)
+
+# 6. Wrap each TensorDataset in a DataLoader for batching.
+train_dataloader = DataLoader(train_ds, batch_size=16, shuffle=True)
+dev_dataloader   = DataLoader(dev_ds,   batch_size=16, shuffle=False)
+test_dataloader  = DataLoader(test_ds,  batch_size=16, shuffle=False)
+
+# 7. Initialize your TempRelModel exactly as before, but now pass the updated `edge_dict` and `max_nodes`.
 config = AutoConfig.from_pretrained("distilbert-base-uncased")
-model = TempRelModel(config, tokenizer, num_labels=4, 
-                     edge_dict={}, max_nodes=100)
+model = TempRelModel(
+    config,
+    tokenizer,
+    num_labels=4,
+    edge_dict=edge_dict,
+    max_nodes=max_nodes,
+)
 
-# Train model
-train(model, train_dataloader, dev_dataloader, test_dataloader,
-      total_train_graphs, total_test_graphs, device="cpu", n_gpu=0)
+# 8. Call the existing train(...) function, it will take:
+#    - model
+#    - train/dev/test DataLoaders
+#    - lists of normalized DGL graphs (total_train_graphs, total_test_graphs)
+#    - device="cpu", n_gpu=0
+train(
+    model,
+    train_dataloader,
+    dev_dataloader,
+    test_dataloader,
+    total_train_graphs,
+    total_test_graphs,
+    device="cpu",
+    n_gpu=0,
+)
+
 ```
 
 ## Evaluation
