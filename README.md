@@ -132,15 +132,6 @@ from src.temporal_rex.eval import evaluate_model, print_evaluation_results
 # Evaluate trained model
 results = evaluate_model(model, test_dataloader, device="cpu")
 print_evaluation_results(results, "Test Set")
-
-# Output:
-# Test Set Results:
-# ----------------------------------------
-# Accuracy: 0.8542
-# Precision: 0.8234
-# Recall: 0.8456
-# F1: 0.8344
-# ----------------------------------------
 ```
 
 ## Advanced Usage
